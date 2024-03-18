@@ -1,0 +1,253 @@
+---
+title: "MTH6139 Time Series"
+subtitle: "Coursework 1"
+author: 
+- name: "Taisiya Sosina" 
+date: "March 2024"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+## 1 Introduction <a id="section-1"></a>
+
+This file aims to use time-series forecasting and utilizing prophet to forecast store sales on data from Corporación Favorita, a large Ecuadorian supermarket company.
+
+### 1.1 Data Set
+
+The data set used is available at Kaggle on the link :
+
+<https://www.kaggle.com/competitions/store-sales-time-series-forecasting>
+
+For this project I will be simplifying the data to take the total unit sales for each day, from the training data only. The training data-set includes the dates ,store number and product category and the sales numbers.
+
+### 1.2 Meta's Prophet forecasting system.
+
+Meta's Prophet forecasting system uses a decomposable time series model that follows the following formula:
+
+$$y(t) =g(t) +s(t) +h(t) +\epsilon (t)$$
+
+
+$g(t)$ : The Trend Function
+
+$s(t)$ : Seasonality
+
+$h(t)$ : The Effects of Holidays
+
+$\epsilon (t)$ : The Error Term
+
+
+### 1.3 Prerequesits
+
+You will need the following libraries to run the code described below:
+
+```{r eval=FALSE, include=TRUE}
+library(readr)   #Used to read the CSV
+library(dplyr)   #Used for Data Manipulation
+library(prophet) #Used in 3
+library(ggplot2) #Used in 2.2
+library(Metrics) #Used in 4
+
+```
+
+## 2 Dataset
+
+### 2.1 Exploring the Dataset
+
+Lets start by doing some basic commands to explore the data set.
+
+```{r eval=TRUE, include=FALSE}
+library(readr)
+library(dplyr) 
+library(prophet) #in 3
+library(ggplot2) #in 2.2
+library(Metrics) #in results
+train <- read_csv("C:/Users/ah21360/OneDrive - Queen Mary, University of London/Desktop/store-sales-time-series-forecasting/train.csv")
+Train_store_sales = train
+
+```
+
+```{r eval=TRUE, include=TRUE}
+head(Train_store_sales)
+summary(Train_store_sales)
+```
+
+#### Some key points:
+
+-   Time goes from 2013-01-01 to 2017-08-15 (5 years and 7 months and 15 days of data)
+
+-   There are 54 stores in total.
+
+-   There are 33 families. Families refer to the categories of goods sold.
+
+### 2.2 Cleaning and Simplifying
+
+As said earlier, we will be simplifying and getting this data ready for our analysis.
+
+```{r eval=TRUE, include=TRUE}
+#checking for missing values (there are none)
+sum(is.na(Train_store_sales))
+```
+
+```{r eval=TRUE, include=TRUE}
+#This way we are disregarding the store number and family of sales and just counting total number of sales per day. Note you will need the dplyr library for this.
+daily_sales <- Train_store_sales %>%
+  group_by(date) %>%
+  summarize(total_sales = sum(sales))
+
+## converting to dataframe (this is needed for prophet)
+my_df <- as.data.frame(daily_sales)
+colnames(my_df) <- c("ds", "y")
+head(my_df)
+```
+
+Now we have everything ready to start doing analysis.
+
+### 2.3 Exploring Dataset
+
+Lets start off by plotting the time series
+
+```{r eval=TRUE, include=TRUE}
+ggplot(my_df, aes(x=ds, y=y)) + xlab('Time') + ylab('Sales') +
+  geom_line()
+```
+
+We can also look at only the first year.
+
+```{r eval=TRUE, include=TRUE}
+my_df_short = my_df[0:365, ]
+ggplot(my_df_short, aes(x=ds, y=y)) + xlab('Time') + ylab('Sales') +
+  geom_line()
+```
+
+#### What we can see:
+
+A)  There is no sales on the first of each month , because the store is closed.
+B)  The sales are increasing over the 4 years in a what seems to be a linear trend.
+C)  By the End of December, there is an increase in sales.
+
+
+## 3 Time Seires
+
+### 3.1 Prophet Model
+
+Let's finally fit out data to the model:
+$m$ is the fitted model.
+$f$ is the data frame that will holds the dates for our future prediction data.
+$p$ is our prediction data
+
+
+```{r eval= TRUE, inlcude = TRUE}
+m = prophet::prophet(my_df)
+
+## we want to make predictions for one year
+f = prophet::make_future_dataframe(m, periods=365, freq="days")
+
+p = predict(m, f)
+plot(m,p)
+
+
+```
+
+We can also decompose our model into trend and seasonality. For this case we do not have daily seasonality, however prophet can do this too. We will also have a look at *Holidays* later.
+
+```{r eval=TRUE, include=TRUE}
+prophet::prophet_plot_components(m, p)
+```
+
+#### What we can say:
+
+- As we said early we can see by the trend that the sales is growing linearly.
+
+- Sunday and Saturday are the highest sales days, which makes logical sense.
+
+- It's visible that sales go up at the end of December around Christmas. 
+
+- This model does not seem to understand that the stores are closed on the 1st of January. 
+
+### 3.2 Holiday effect
+
+If we want to add holidays to prophet we have to add a a data frame for them that has two columns *holidays* and *ds*.
+
+Let's add the New year as a holiday to better plot the fact that the stores are closed on the New years and re-run our model.
+
+```{r eval=TRUE, include=TRUE}
+New_year <- data_frame(
+  holiday = 'New_Year',
+  ds = as.Date(c('2013-01-01', '2014-01-01', '2015-01-01','2016-01-01','2017-01-01','2018-01-01'))
+)
+holidays = New_year
+m_holidays = prophet::prophet(holidays = holidays)
+m_holidays = prophet::fit.prophet(m_holidays, my_df)
+f_holidays = prophet::make_future_dataframe(m_holidays, periods=365, freq="days")
+p_holidays = predict(m_holidays, f_holidays)
+```
+
+```{r eval=TRUE, include=TRUE}
+prophet::prophet_plot_components(m_holidays, p_holidays)
+```
+
+We now see that we have a new component called *holidays* in our plot components. This will take away a large value from the predicted value on January first. However, it is worth noting that it still doesn't make it 0.
+
+
+## 4 Results
+
+We can split our data set into *test* and *train* data. 
+
+``` {r eval=TRUE , include = TRUE}
+### Train and test
+my_df_train = my_df[0:1457, ]
+my_df_test = my_df[1458:1684 , ]
+
+
+```
+
+- Train is the first 4 years from 2013-01-01 to 2016-12-31.
+
+- Test is from 2017-01-01 to 2017-08-15. There is 227 days to be predicted
+
+
+We can now fit our holiday model to the train data set:
+```{r eval=TRUE , include = TRUE}
+m_holidays_train = prophet::prophet(holidays = holidays)
+m_holidays_train = prophet::fit.prophet(m_holidays_train, my_df_train)
+f_holidays_train = prophet::make_future_dataframe(m_holidays_train, periods=227, freq="days") # Note how this is now 227 days
+p_holidays_train = predict(m_holidays_train, f_holidays_train)
+plot(m_holidays_train,p_holidays_train)
+
+```
+
+We can use the *Metric* library to find out the RMSE.
+
+```{r eval=TRUE , include = TRUE}
+preds_holiday = p_holidays_train$yhat[1458:1684]
+rmse(my_df_test$y,preds_holiday)
+```
+
+
+## 5 Conclusion and Further Work
+
+There is definitely room for improvement here. Lets have a look at the model with the testing data points.
+
+```{r eval=TRUE , include = TRUE}
+plot(m_holidays,p_holidays_train)
+```
+
+#### Evaluation
+
+1. Firstly, the trend is not well represented in  2017 and for some reason all our values seem to be under fitted. This did not seem like an issue when we had data for 2017 includedin our trianing. That being said , the trend somewhat slows down for 2016 so that could be the issue.
+
+2. This is further backed by the very high values for RMSE that we obtained in our results
+
+3. Even though 1st of January is lower then the 1st model (without added holidays) it is still not 0.
+
+#### Further Improvements
+
+- It would be great to set the predicted value for 1st of Jan as 0.
+
+- Add other holidays of Ecuador to the holidays data frame mentioned earlier.
+
+- Fix the trend for 2017.
+
+- Separate the predictions by store number and family of item (category).
